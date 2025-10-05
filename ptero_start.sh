@@ -5,6 +5,16 @@ if [ -f "$FLAG_FILE" ]; then
     exit 0
 fi
 
+# ASCII art grande y claro "FoxServers"
+echo -e "\033[1;34m"
+echo " ______      _____  __     __  ______  _____  ______  ______  ______  "
+echo "|  ___ \    /  ___| \ \   / / |  ___ \|  ___||___  / |  ___||  __  | "
+echo "| |   | |  _\ `--.   \ \_/ /  | |   | | |__     / /  | |__  | |  | | "
+echo "| |   | | | |`--. \   \   /   | |   | |  __|   / /   |  __| | |  | | "
+echo "| |___| | | /\__/ /    | |    | |___| | |___  / /__  | |___ | |__| | "
+echo "|______/  \_|____/     |_|    |______/|_____||_____| |_____||______| "
+echo -e "\033[0m"
+
 # Función para animación de barra con colores gradientes
 progress_bar() {
     local duration=$1
