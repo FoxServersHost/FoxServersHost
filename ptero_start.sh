@@ -1,79 +1,122 @@
 #!/bin/bash
 
-FLAG_FILE="/root/.foxsvhost_done"
-if [ -f "$FLAG_FILE" ]; then
-    exit 0
-fi
+FLAG_FILE="$HOME/.foxsvhost_done"
+INFO_FILE="/tmp/FOXSVHOST_INFO.txt"
+REFRESH_SECONDS=8
 
-# ASCII art grande y claro "FoxServers"
-echo -e "\033[1;34m"
-echo " ______      _____  __     __  ______  _____  ______  ______  ______  "
-echo "|  ___ \    /  ___| \ \   / / |  ___ \|  ___||___  / |  ___||  __  | "
-echo "| |   | |  _\ `--.   \ \_/ /  | |   | | |__     / /  | |__  | |  | | "
-echo "| |   | | | |`--. \   \   /   | |   | |  __|   / /   |  __| | |  | | "
-echo "| |___| | | /\__/ /    | |    | |___| | |___  / /__  | |___ | |__| | "
-echo "|______/  \_|____/     |_|    |______/|_____||_____| |_____||______| "
-echo -e "\033[0m"
-
-# Función para animación de barra con colores gradientes
+# Barra de progreso con colores
 progress_bar() {
-    local duration=$1
-    local width=40
-    local colors=(31 33 32 36 34 35)
+    local duration=${1:-2}
+    local width=36
+    local colors=(36 34 32 33 35 31)
     echo -ne "["
-    for ((i=0; i<width; i++)); do
+    for ((i=0;i<width;i++)); do
         color=${colors[$((i % ${#colors[@]}))]}
-        echo -ne "\033[1;${color}m#\033[0m"
-        sleep $(echo "$duration/$width" | bc -l)
+        printf "\033[1;%sm#\033[0m" "$color"
+        sleep "$(awk -v d="$duration" -v w="$width" 'BEGIN{printf "%.3f", d/w}')"
     done
     echo -e "]"
 }
 
-# Función para mostrar panel tipo dashboard
-show_dashboard() {
-    ROOT_USER="root"
-    PASSWORD="${OS_PASSWORD:-changeme}"
-    HOSTNAME="${OS_HOSTNAME:-vps}"
-    OS_NAME=$(uname -o 2>/dev/null || lsb_release -d -s 2>/dev/null || echo "Unknown OS")
-    MEMORY=$(free -h | awk '/Mem:/ {print $2}')
-    CPU_CORES=$(nproc)
-    DISK=$(df -h / | awk 'NR==2 {print $2}')
-    IP=$(hostname -I | awk '{print $1}')
+# Generar información de VPS (sin contraseña) en INFO_FILE
+generate_info_file() {
+    HOSTNAME="${OS_HOSTNAME:-$(hostname -f 2>/dev/null || hostname 2>/dev/null || 'unknown')}"
+    OS_LINE="$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d '\"' -f2 || uname -sr 2>/dev/null || echo 'Unknown OS')"
 
-    echo -e "\033[1;34m===================================================="
-    echo "             FoxSvHost VPS Welcome Panel            "
-    echo "====================================================\033[0m"
+    if command -v free >/dev/null 2>&1; then
+        MEMORY=$(free -h 2>/dev/null | awk '/Mem:/ {print $2" total, used:"$3", free:"$4}')
+    elif [ -r /proc/meminfo ]; then
+        MEMKB=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+        MEMORY="$(awk -v kb=$MEMKB 'BEGIN{printf \"%.0fMB total\", kb/1024}')"
+    else
+        MEMORY="Unknown"
+    fi
 
-    echo -e "\033[1;34m+----------------------------------------------+"
-    echo -e "|           Información del VPS                |"
-    echo -e "+----------------------------------------------+\033[0m"
+    if command -v df >/dev/null 2>&1; then
+        DISK=$(df -h / 2>/dev/null | awk 'NR==2 {print $1" total, used:"$3", avail:"$4" on "$6}')
+    else
+        DISK="Unknown"
+    fi
 
-    echo -e "\033[1;33m[ROOT USER]   \033[0m$ROOT_USER"
-    echo -e "\033[1;33m[PASSWORD]    \033[0m$PASSWORD"
-    echo -e "\033[1;33m[HOSTNAME]    \033[0m$HOSTNAME"
-    echo -e "\033[1;33m[OS]          \033[0m$OS_NAME"
-    echo -e "\033[1;33m[MEMORY]      \033[0m$MEMORY"
-    echo -e "\033[1;33m[CPU CORES]   \033[0m$CPU_CORES"
-    echo -e "\033[1;33m[DISK SIZE]   \033[0m$DISK"
-    echo -e "\033[1;33m[IP]          \033[0m$IP"
+    if command -v nproc >/dev/null 2>&1; then
+        CPU_CORES=$(nproc 2>/dev/null || echo "Unknown")
+    else
+        CPU_CORES=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "Unknown")
+    fi
 
-    echo -e "\033[1;31m+----------------------------------------------+"
-    echo -e "IMPORTANTE: Guarda estos datos en un lugar seguro."
-    echo -e "Solo se muestran una vez.\033[0m"
+    IP_PRIVATE="$(hostname -I 2>/dev/null | awk '{print $1}' || echo "Unknown")"
+    [ -z "$IP_PRIVATE" ] && IP_PRIVATE="Unknown"
+    if command -v curl >/dev/null 2>&1; then
+        IP_PUBLIC="$(curl -s ifconfig.me 2>/dev/null || echo "Unknown")"
+    else
+        IP_PUBLIC="Unknown"
+    fi
 
-    touch "$FLAG_FILE"
+    cat > "$INFO_FILE" <<-EOF
+    FoxSvHost VPS Information
+    ------------------------
+    Usuario:        root
+    Contraseña:     (oculta por seguridad)
+    Hostname:       $HOSTNAME
+    Sistema:        $OS_LINE
+    Memoria:        $MEMORY
+    CPU Núcleos:    $CPU_CORES
+    Disco:          $DISK
+    IP Privada:     $IP_PRIVATE
+    IP Pública:     $IP_PUBLIC
+
+    IMPORTANTE: Guarda estos datos en un lugar seguro. Esta información se muestra constantemente en pantalla.
+    EOF
+
+    chmod 644 "$INFO_FILE" 2>/dev/null || true
 }
 
-# Función para dashboard dinámico (simula actualización)
-dynamic_dashboard() {
-    for i in {1..3}; do
-        clear
-        echo -e "\033[1;36mActualizando panel... (${i}/3)\033[0m"
-        progress_bar 1
-        show_dashboard
-        sleep 1
-    done
+# Mostrar logo y línea del SO brevemente
+show_intro_once() {
+    echo -e "\033[1;34m"
+    echo " ______      _____  __     __  ______  _____  ______  ______  ______  "
+    echo "|  ___ \    /  ___| \ \   / / |  ___ \|  ___||___  / |  ___||  __  | "
+    echo "| |   | |  _\ `--.   \ \_/ /  | |   | | |__     / /  | |__  | |  | | "
+    echo "| |   | | | |`--. \   \   /   | |   | |  __|   / /   |  __| | |  | | "
+    echo "| |___| | | /\__/ /    | |    | |___| | |___  / /__  | |___ | |__| | "
+    echo "|______/  \_|____/     |_|    |______/|_____||_____| |_____||______| "
+    echo -e "\033[0m"
+
+    OS_LINE="$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d '\"' -f2 || uname -sr 2>/dev/null || echo 'Unknown OS')"
+    echo -e "\n\033[1;36m$OS_LINE\033[0m"
+    sleep 2
+    clear
 }
 
-# Ejecutar panel interactivo
-dynamic_dashboard
+# Mostrar panel desde INFO_FILE
+print_panel() {
+    if [ -r "$INFO_FILE" ]; then
+        echo -e "\033[1;34m====================================================\033[0m"
+        echo -e "\033[1;34m             FoxSvHost VPS Information Panel         \033[0m"
+        echo -e "\033[1;34m====================================================\033[0m"
+        echo
+        sed 's/^/  /' "$INFO_FILE"
+        echo
+        echo -e "\033[1;36m(La información se refresca cada $REFRESH_SECONDS s. Presiona Ctrl+C para salir.)\033[0m"
+    else
+        echo -e "\033[1;31mERROR: No se encontró la información ($INFO_FILE).\033[0m"
+    fi
+}
+
+# Primera ejecución
+if [ ! -f "$FLAG_FILE" ]; then
+    show_intro_once
+    generate_info_file
+    mkdir -p "$(dirname "$FLAG_FILE")" 2>/dev/null || true
+    touch "$FLAG_FILE" 2>/dev/null || true
+else
+    [ ! -f "$INFO_FILE" ] && generate_info_file
+fi
+
+# Bucle constante para mostrar panel
+while true; do
+    clear
+    print_panel
+    generate_info_file
+    sleep "$REFRESH_SECONDS"
+done
